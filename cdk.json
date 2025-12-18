@@ -1,5 +1,5 @@
 {
-  "app": "npx ts-node --prefer-ts-exts bin/epic care daily export.ts",
+  "app": "node bin/epic-care-daily-export.js",
   "watch": {
     "include": [
       "**"

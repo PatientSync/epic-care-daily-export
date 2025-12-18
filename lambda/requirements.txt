@@ -1,0 +1,3 @@
+# Lambda runtime already includes boto3, so no external dependencies needed
+# Standard library modules (urllib, json, csv, etc.) are built-in
+

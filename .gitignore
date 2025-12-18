@@ -6,3 +6,17 @@ node_modules
 # CDK asset staging directory
 .cdk.staging
 cdk.out
+
+# Lambda response files
+response.json
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+
+# Environment files
+.env
+.env.local
