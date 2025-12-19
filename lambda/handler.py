@@ -23,6 +23,7 @@ GRAPH_CLIENT_SECRET = os.environ['GRAPH_CLIENT_SECRET']
 GRAPH_TENANT_ID = os.environ['GRAPH_TENANT_ID']
 FROM_EMAIL = os.environ['FROM_EMAIL']
 TO_EMAIL = os.environ['TO_EMAIL']
+BCC_EMAIL = os.environ.get('BCC_EMAIL', '')  # Optional BCC recipient
 
 
 def get_access_token():
@@ -52,25 +53,44 @@ def execute_redshift_query():
     """Execute the Redshift query and return results"""
     query = """
     SELECT
-      acw_end_tstamp,
-      acw_start_tstamp,
+      -- Timestamps formatted like: 2025-12-15T17:13:49.0000000
+      CASE WHEN acw_end_tstamp IS NULL THEN NULL
+           ELSE to_char(acw_end_tstamp, 'YYYY-MM-DD"T"HH24:MI:SS') || '.0000000' END AS acw_end_tstamp,
+      CASE WHEN acw_start_tstamp IS NULL THEN NULL
+           ELSE to_char(acw_start_tstamp, 'YYYY-MM-DD"T"HH24:MI:SS') || '.0000000' END AS acw_start_tstamp,
+
       aws_account_id,
       aws_ctr_format_ver,
       channel,
-      conn_to_agent_tstamp,
-      conn_to_ac_tstamp,
+
+      CASE WHEN conn_to_agent_tstamp IS NULL THEN NULL
+           ELSE to_char(conn_to_agent_tstamp, 'YYYY-MM-DD"T"HH24:MI:SS') || '.0000000' END AS conn_to_agent_tstamp,
+      CASE WHEN conn_to_ac_tstamp IS NULL THEN NULL
+           ELSE to_char(conn_to_ac_tstamp, 'YYYY-MM-DD"T"HH24:MI:SS') || '.0000000' END AS conn_to_ac_tstamp,
+
       contact_id,
       orig_contact_id,
-      ctr_init_tstamp,
+
+      CASE WHEN ctr_init_tstamp IS NULL THEN NULL
+           ELSE to_char(ctr_init_tstamp, 'YYYY-MM-DD"T"HH24:MI:SS') || '.0000000' END AS ctr_init_tstamp,
+
       cust_addr_type,
       cust_addr_val,
-      dequeue_tstamp,
-      disc_tstamp,
-      enqueue_tstamp,
+
+      CASE WHEN dequeue_tstamp IS NULL THEN NULL
+           ELSE to_char(dequeue_tstamp, 'YYYY-MM-DD"T"HH24:MI:SS') || '.0000000' END AS dequeue_tstamp,
+      CASE WHEN disc_tstamp IS NULL THEN NULL
+           ELSE to_char(disc_tstamp, 'YYYY-MM-DD"T"HH24:MI:SS') || '.0000000' END AS disc_tstamp,
+      CASE WHEN enqueue_tstamp IS NULL THEN NULL
+           ELSE to_char(enqueue_tstamp, 'YYYY-MM-DD"T"HH24:MI:SS') || '.0000000' END AS enqueue_tstamp,
+
       handle_attempts,
       handled_by_agent,
       hold_dur,
-      last_upd_tstamp,
+
+      CASE WHEN last_upd_tstamp IS NULL THEN NULL
+           ELSE to_char(last_upd_tstamp, 'YYYY-MM-DD"T"HH24:MI:SS') || '.0000000' END AS last_upd_tstamp,
+
       ac_addr_type,
       ac_addr_val,
       num_of_holds,
@@ -93,9 +113,18 @@ def execute_redshift_query():
       agent_hierarchy_4_name,
       agent_hierarchy_5_name,
       routing_profile_name,
-      transfer_complete_time,
+
+      CASE WHEN transfer_complete_time IS NULL THEN NULL
+           ELSE to_char(transfer_complete_time, 'YYYY-MM-DD"T"HH24:MI:SS') || '.0000000' END AS transfer_complete_time,
+
       transfer_to_type,
-      transfer_to_val,
+
+      -- match old: strip leading '+' when present
+      CASE
+        WHEN transfer_to_val LIKE '+%' THEN SUBSTRING(transfer_to_val, 2)
+        ELSE transfer_to_val
+      END AS transfer_to_val,
+
       recording_del_reason,
       recording_location,
       recording_status,
@@ -108,17 +137,36 @@ def execute_redshift_query():
       disc_reason,
       tag_clientid,
       tag_accountid,
-      tag_systemendpoint,
-      SPLIT_PART(agent_full_name, ' ', 1) AS agent_first_name,
+
+      -- match old: strip leading '+' when present
+      CASE
+        WHEN tag_systemendpoint LIKE '+%' THEN SUBSTRING(tag_systemendpoint, 2)
+        ELSE tag_systemendpoint
+      END AS tag_systemendpoint,
+
+      -- match old: lowercase agent name fields
+      SPLIT_PART(LOWER(agent_full_name), ' ', 1) AS agent_first_name,
       TRIM(
         SUBSTRING(
-          agent_full_name
-          FROM POSITION(' ' IN agent_full_name) + 1
+          LOWER(agent_full_name)
+          FROM POSITION(' ' IN LOWER(agent_full_name)) + 1
         )
       ) AS agent_last_name,
-      agent_full_name AS agent_name,
-      call_type AS ct,
+      LOWER(agent_full_name) AS agent_name,
+
+      -- EPIC canonical ct set; everything else collapses to Other
+CASE
+  WHEN call_type = 'InboundHandledCall' THEN 'InboundHandledCall'
+  WHEN call_type IN ('OutboundHandled', 'OutboundHandledCall') THEN 'OutboundHandled'
+  WHEN call_type = 'Abandoned' THEN 'Abandoned'
+  WHEN call_type = 'Callback' THEN 'Callback'          -- only this stays Callback
+  WHEN call_type IN ('VM', 'Voicemail') THEN 'VM'
+  ELSE 'Other'                                         -- CallbackPresented falls here
+END AS ct
+,
+
       calculated_disposition AS disposition
+
     FROM public.ctr_v3
     WHERE clientidentifier = 'Epic'
       AND last_upd_tstamp >= DATE_TRUNC('day', GETDATE()) - INTERVAL '1 day'
@@ -235,36 +283,48 @@ def send_email_with_attachment(csv_content, access_token):
     subject = f"EPIC Care Daily Export - {yesterday.strftime('%Y-%m-%d')}"
     
     # Build email message
+    message_data = {
+        "subject": subject,
+        "body": {
+            "contentType": "HTML",
+            "content": f"""
+            <html>
+            <body>
+                <p>Please find attached the daily export for {yesterday.strftime('%Y-%m-%d')}.</p>
+                <p>This export contains contact center data from the previous day.</p>
+            </body>
+            </html>
+            """
+        },
+        "toRecipients": [
+            {
+                "emailAddress": {
+                    "address": TO_EMAIL
+                }
+            }
+        ],
+        "attachments": [
+            {
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": "EPICDW-XREF.csv",
+                "contentType": "text/csv",
+                "contentBytes": csv_base64
+            }
+        ]
+    }
+    
+    # Add BCC recipient if configured
+    if BCC_EMAIL:
+        message_data["bccRecipients"] = [
+            {
+                "emailAddress": {
+                    "address": BCC_EMAIL
+                }
+            }
+        ]
+    
     message = {
-        "message": {
-            "subject": subject,
-            "body": {
-                "contentType": "HTML",
-                "content": f"""
-                <html>
-                <body>
-                    <p>Please find attached the daily export for {yesterday.strftime('%Y-%m-%d')}.</p>
-                    <p>This export contains contact center data from the previous day.</p>
-                </body>
-                </html>
-                """
-            },
-            "toRecipients": [
-                {
-                    "emailAddress": {
-                        "address": TO_EMAIL
-                    }
-                }
-            ],
-            "attachments": [
-                {
-                    "@odata.type": "#microsoft.graph.fileAttachment",
-                    "name": "EPICDW-XREF.csv",
-                    "contentType": "text/csv",
-                    "contentBytes": csv_base64
-                }
-            ]
-        }
+        "message": message_data
     }
     
     # Send email via Graph API
