@@ -23,7 +23,7 @@ export class EpicCareDailyExportStack extends cdk.Stack {
     const GRAPH_TENANT_ID = this.node.tryGetContext('graphTenantId') || process.env.GRAPH_TENANT_ID || '';
     const FROM_EMAIL = 'Ashley.Clarke@patientsync.com';
     const TO_EMAIL = 'data@epic-care.net';
-    const BCC_EMAIL = 'clint.holliday@patientsync.com';
+    const BCC_EMAIL = ''; // No BCC recipient
     
     // Validate required configuration
     if (!GRAPH_CLIENT_ID || !GRAPH_CLIENT_SECRET || !GRAPH_TENANT_ID) {

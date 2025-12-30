@@ -306,7 +306,7 @@ def send_email_with_attachment(csv_content, access_token):
         "attachments": [
             {
                 "@odata.type": "#microsoft.graph.fileAttachment",
-                "name": "EPICDW-XREF.csv",
+                "name": "EPICDW-XREF_PatSync.csv",
                 "contentType": "text/csv",
                 "contentBytes": csv_base64
             }
